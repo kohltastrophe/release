@@ -1,0 +1,23 @@
+{
+	"name": "@kohltastrophe/release",
+	"version": "1.0.0",
+	"description": "Conventional Commits validation, Keep a Changelog generator, and automated Release PR action.",
+	"license": "MIT",
+	"author": "Kohl <kohltastrophe@gmail.com>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/kohltastrophe/release.git"
+	},
+	"type": "module",
+	"main": "./release.mjs",
+	"bin": {
+		"release": "./release.mjs"
+	},
+	"files": [
+		"release.mjs",
+		"action.yml"
+	],
+	"scripts": {
+		"test": "node --test"
+	}
+}
