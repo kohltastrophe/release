@@ -292,7 +292,7 @@ export function buildChangelogFromCommits(baseVersion, commits, options) {
 
 	for (const raw of commits) {
 		const subject = raw.subject.trim();
-		if (!subject || /^Revert "/.test(subject)) continue;
+		if (!subject || /^Revert "|^Merge /.test(subject)) continue;
 		let parsed;
 		try {
 			parsed = validateCommitSubject(subject);
@@ -704,6 +704,13 @@ function hasGitTag(cwd, version) {
 	return tryGit(cwd, ["rev-parse", "-q", "--verify", `refs/tags/v${version}`]) !== undefined;
 }
 
+function isHeadTagged(cwd, version) {
+	assertSafeGitRef(version, "version");
+	const headSha = tryGit(cwd, ["rev-parse", "-q", "--verify", "HEAD"]);
+	const tagSha = tryGit(cwd, ["rev-parse", "-q", "--verify", `refs/tags/v${version}^{commit}`]);
+	return Boolean(headSha && tagSha && headSha === tagSha);
+}
+
 function latestGitTag(cwd, fromRef = "HEAD") {
 	assertSafeGitRef(fromRef, "ref");
 	const tag = tryGit(cwd, [
@@ -1058,9 +1065,9 @@ function runCheckMode(root, repoUrl, currentVersion, versionsByFile, explicitRan
 
 	if (range) {
 		buildChangelogFromCommits(baseTag ?? currentVersion, readCommitsInRange(root, range));
-	} else {
+	} else if (!prTitle) {
 		const headSubject = headCommitSubject(root);
-		if (headSubject && !/^Revert "/.test(headSubject)) {
+		if (headSubject && !/^Revert "|^Merge /.test(headSubject)) {
 			validateCommitSubject(headSubject);
 		}
 	}
@@ -1166,18 +1173,17 @@ export function main(argv) {
 		const releaseMatch = RELEASE_COMMIT_RE.exec(headSubject);
 		const isTagRef = process.env.GITHUB_REF_TYPE === "tag";
 		const isWorkflowDispatch = eventName === "workflow_dispatch";
-		if (dryRun || (mode === "auto" && isWorkflowDispatch && !releaseMatch && !isTagRef)) {
-			runReleaseMode(
-				root,
-				repoUrl,
-				currentVersion,
-				versionsByFile,
-				releaseMatch?.[1],
-				dryRun || !isTagRef,
-			);
+		const isReleaseCommit =
+			mode === "release" ||
+			Boolean(releaseMatch) ||
+			isTagRef ||
+			isWorkflowDispatch ||
+			isHeadTagged(root, currentVersion);
+		if (dryRun) {
+			runReleaseMode(root, repoUrl, currentVersion, versionsByFile, releaseMatch?.[1], true);
 			return;
 		}
-		if (mode === "auto" && !releaseMatch && !isTagRef) {
+		if (!isReleaseCommit) {
 			runPullRequestFlow(root, repoUrl, headSubject);
 			return;
 		}

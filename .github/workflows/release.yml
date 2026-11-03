@@ -48,11 +48,15 @@ jobs:
           PRERELEASE: ${{ steps.release.outputs.prerelease }}
           NOTES_FILE: ${{ steps.release.outputs.notes_file }}
         run: |
-          gh release create "$TAG" \
-            --target "$GITHUB_SHA" \
-            --title "$TAG" \
-            --notes-file "$NOTES_FILE" \
-            $([ "$PRERELEASE" = "true" ] && echo "--prerelease" || echo "--latest")
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes-file "$NOTES_FILE" \
+              $([ "$PRERELEASE" = "true" ] && echo "--prerelease" || echo "--latest")
+          fi
 
           if [ "$PRERELEASE" != "true" ]; then
             MAJOR_TAG="${TAG%%.*}"

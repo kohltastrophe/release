@@ -427,6 +427,29 @@ describe("semver & conventional commits", () => {
 				process.env.PR_TITLE = 'Revert "feat: add new widget"';
 				main(["--check"]);
 
+				rmSync(join(dir, "CHANGELOG.md"));
+				gitCommit(dir, "Merge 1111111 into 2222222");
+				process.env.PR_TITLE = "feat: valid pr title";
+				main(["--check"]);
+				delete process.env.PR_TITLE;
+				main(["--check"]);
+				writeFileSync(
+					join(dir, "CHANGELOG.md"),
+					[
+						"# Changelog",
+						"",
+						"## [0.1.0] - 2026-08-01",
+						"",
+						"### Added",
+						"",
+						"- Initial release.",
+						"",
+						"[0.1.0]: https://github.com/owner/pkg/releases/tag/v0.1.0",
+						"",
+					].join("\n"),
+				);
+				gitCommit(dir, "docs: restore changelog");
+
 				main(["minor"]);
 				assert.equal(detectRepoVersion(dir).version, "0.2.0");
 				assert.ok(readFileSync(join(dir, "CHANGELOG.md"), "utf8").includes("## [0.2.0]"));
@@ -440,6 +463,28 @@ describe("semver & conventional commits", () => {
 				assert.ok(dryOut.includes("should_release=false"));
 				assert.ok(dryOut.includes("version=0.2.0"));
 				delete process.env.INPUT_DRY_RUN;
+
+				const dispatchOutFile = join(dir, "gh-dispatch-output.txt");
+				process.env.GITHUB_OUTPUT = dispatchOutFile;
+				process.env.INPUT_MODE = "auto";
+				process.env.GITHUB_EVENT_NAME = "workflow_dispatch";
+				main(["--ci"]);
+				const dispatchOut = readFileSync(dispatchOutFile, "utf8");
+				assert.ok(dispatchOut.includes("should_release=true"));
+				assert.ok(dispatchOut.includes("version=0.2.0"));
+				delete process.env.GITHUB_EVENT_NAME;
+
+				gitCommit(dir, "docs: polish release notes");
+				execFileSync("git", ["tag", "v0.2.0"], { cwd: dir });
+				const taggedHeadOutFile = join(dir, "gh-tagged-head-output.txt");
+				process.env.GITHUB_OUTPUT = taggedHeadOutFile;
+				process.env.INPUT_MODE = "auto";
+				main(["--ci"]);
+				const taggedHeadOut = readFileSync(taggedHeadOutFile, "utf8");
+				assert.ok(taggedHeadOut.includes("should_release=true"));
+				assert.ok(taggedHeadOut.includes("version=0.2.0"));
+				assert.ok(taggedHeadOut.includes("tag=v0.2.0"));
+				execFileSync("git", ["tag", "-d", "v0.2.0"], { cwd: dir });
 
 				gitCommit(dir, "chore: release 0.2.0 (#7)");
 				const outFile = join(dir, "gh-output.txt");
