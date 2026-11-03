@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run tests
+        run: node --test
+
+      - name: Run release action
+        uses: ./
+        id: release
+        with:
+          mode: auto
+          pr-title: ${{ github.event.pull_request.title }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release & update major tag
+        if: steps.release.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+          NOTES_FILE: ${{ steps.release.outputs.notes_file }}
+        run: |
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes-file "$NOTES_FILE" \
+            $([ "$PRERELEASE" = "true" ] && echo "--prerelease" || echo "--latest")
+
+          if [ "$PRERELEASE" != "true" ]; then
+            MAJOR_TAG="${TAG%%.*}"
+            git -c user.name="github-actions[bot]" \
+                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                tag -fa "$MAJOR_TAG" -m "$MAJOR_TAG" "$GITHUB_SHA"
+            git push --force origin "refs/tags/$MAJOR_TAG"
+          fi
