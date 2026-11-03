@@ -1,0 +1,83 @@
+name: "Release & Conventional Commits"
+description: "Validates Conventional Commits, opens/updates Keep a Changelog Release PRs, and prepares GitHub Releases."
+author: "Kohl"
+
+branding:
+  icon: "tag"
+  color: "purple"
+
+inputs:
+  mode:
+    description: "Operation mode: auto | check | pr | release"
+    required: false
+    default: "auto"
+  token:
+    description: "GitHub token for creating/updating Release PRs and GitHub Releases"
+    required: false
+    default: ${{ github.token }}
+  working-directory:
+    description: "Repository root directory"
+    required: false
+    default: "."
+  pr-title:
+    description: "Pull request title to validate in check mode"
+    required: false
+    default: ""
+  repo-url:
+    description: "Repository URL override for changelog release tag links"
+    required: false
+    default: ""
+  version-files:
+    description: "Additional version files (newline-separated paths or file:pattern entries) to validate and bump"
+    required: false
+    default: ""
+  dry-run:
+    description: "Validate state and resolve version/release notes without opening a PR or triggering should_release"
+    required: false
+    default: "false"
+  wait-for-ci:
+    description: "Comma or newline-separated CI workflow filenames (e.g. ci.yml) to wait for on $GITHUB_SHA before releasing"
+    required: false
+    default: ""
+  wait-timeout:
+    description: "Maximum minutes to wait for CI workflows to complete"
+    required: false
+    default: "30"
+
+outputs:
+  should_release:
+    description: "Whether the current commit should trigger a package/GitHub release"
+    value: ${{ steps.run.outputs.should_release }}
+  version:
+    description: "Resolved SemVer version (without leading v)"
+    value: ${{ steps.run.outputs.version }}
+  tag:
+    description: "Resolved Git tag (vX.Y.Z)"
+    value: ${{ steps.run.outputs.tag }}
+  prerelease:
+    description: "Whether the version is a SemVer prerelease"
+    value: ${{ steps.run.outputs.prerelease }}
+  notes_file:
+    description: "Path to the generated release-notes.md file"
+    value: ${{ steps.run.outputs.notes_file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run release action
+      id: run
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        GH_TOKEN: ${{ inputs.token }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+        GITHUB_ACTION_TOKEN: ${{ github.token }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        INPUT_PR_TITLE: ${{ inputs.pr-title }}
+        INPUT_REPO_URL: ${{ inputs.repo-url }}
+        INPUT_VERSION_FILES: ${{ inputs.version-files }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        INPUT_WAIT_FOR_CI: ${{ inputs.wait-for-ci }}
+        INPUT_WAIT_TIMEOUT: ${{ inputs.wait-timeout }}
+      run: node "$ACTION_PATH/release.mjs" --ci

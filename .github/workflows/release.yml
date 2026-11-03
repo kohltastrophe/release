@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Run tests
+        run: node --test
+
+      - name: Run release action
+        uses: ./
+        id: release
+        with:
+          mode: auto
+          pr-title: ${{ github.event.pull_request.title }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release & update major tag
+        if: steps.release.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+          NOTES_FILE: ${{ steps.release.outputs.notes_file }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
+          elif git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file "$NOTES_FILE" \
+              $([ "$PRERELEASE" = "true" ] && echo "--prerelease" || echo "--latest")
+          else
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes-file "$NOTES_FILE" \
+              $([ "$PRERELEASE" = "true" ] && echo "--prerelease" || echo "--latest")
+          fi
+
+          if [ "$PRERELEASE" != "true" ]; then
+            MAJOR_TAG="${TAG%%.*}"
+            git -c user.name="github-actions[bot]" \
+                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                tag -fa "$MAJOR_TAG" -m "$MAJOR_TAG" "$GITHUB_SHA"
+            git push --force origin "refs/tags/$MAJOR_TAG"
+          fi
