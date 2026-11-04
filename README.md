@@ -1,5 +1,7 @@
 # release
 
+[![CI](https://img.shields.io/github/actions/workflow/status/kohltastrophe/release/release.yml?style=for-the-badge)](https://github.com/kohltastrophe/release/actions/workflows/release.yml) [![License](https://img.shields.io/github/license/kohltastrophe/release?style=for-the-badge)](LICENSE.md) [![GitHub Release](https://img.shields.io/github/v/release/kohltastrophe/release?style=for-the-badge)](https://github.com/kohltastrophe/release/releases)
+
 Zero-dependency GitHub Action and CLI for validating Conventional Commits, opening automated `chore: release X.Y.Z` pull requests, and formatting [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) release notes. It bumps version manifests across ecosystems (`package.json`, `wally.toml`, `pesde.toml`, `rotriever.toml`, `Cargo.toml`, `pyproject.toml`, `VERSION.txt`, plus any `[release]` `versions` entries in root `*.toml` configs).
 
 - **With `CHANGELOG.md`:** Stamps and validates `CHANGELOG.md` alongside version manifests in the Release PR.
