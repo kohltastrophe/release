@@ -1254,4 +1254,110 @@ describe("semver & conventional commits", () => {
 			}
 		});
 	});
+
+	test("bumps past non-ancestor release tags and uses HEAD when re-releasing an existing tag", () => {
+		withTempDir((dir) => {
+			const remoteDir = join(dir, "remote.git");
+			const repoDir = join(dir, "repo");
+			const binDir = join(dir, "bin");
+			mkdirSync(remoteDir);
+			mkdirSync(repoDir);
+			mkdirSync(binDir);
+			execFileSync("git", ["init", "--bare", remoteDir]);
+			initGitRepo(repoDir);
+			execFileSync("git", ["remote", "add", "origin", remoteDir], { cwd: repoDir });
+
+			writeFileSync(
+				join(repoDir, "package.json"),
+				JSON.stringify({ name: "pkg", version: "0.19.0" }, null, 2),
+			);
+			execFileSync("git", ["add", "package.json"], { cwd: repoDir });
+			execFileSync("git", ["commit", "--no-gpg-sign", "-m", "chore: release 0.19.0"], {
+				cwd: repoDir,
+			});
+			execFileSync("git", ["tag", "v0.19.0"], { cwd: repoDir });
+
+			gitCommit(repoDir, "fix: first fix in 0.19.1");
+			const baseMainSha = execFileSync("git", ["rev-parse", "HEAD"], {
+				cwd: repoDir,
+				encoding: "utf8",
+			}).trim();
+
+			// Simulate merging PR for 0.19.1 and tagging v0.19.1, then resetting main back to baseMainSha
+			writeFileSync(
+				join(repoDir, "package.json"),
+				JSON.stringify({ name: "pkg", version: "0.19.1" }, null, 2),
+			);
+			execFileSync("git", ["add", "package.json"], { cwd: repoDir });
+			execFileSync(
+				"git",
+				["commit", "--no-gpg-sign", "-m", "chore: release 0.19.1 (#585)"],
+				{ cwd: repoDir },
+			);
+			execFileSync("git", ["tag", "v0.19.1"], { cwd: repoDir });
+			execFileSync("git", ["reset", "--hard", baseMainSha], { cwd: repoDir });
+
+			// Now v0.19.1 is a non-ancestor tag while package.json is still 0.19.0
+			gitCommit(repoDir, "fix: second fix after 0.19.1");
+			execFileSync("git", ["push", "-u", "origin", "main", "--tags"], { cwd: repoDir });
+
+			const fakeGhScript = join(binDir, "gh-capture.mjs");
+			const fakeGhPath = join(binDir, "gh");
+			const capturedArgsFile = join(dir, "gh-args.json");
+			writeFileSync(
+				fakeGhScript,
+				[
+					"import { writeFileSync } from 'node:fs';",
+					"const args = process.argv.slice(2);",
+					"if (args[0] === 'pr' && args[1] === 'list') { process.stdout.write('[]'); process.exit(0); }",
+					`if (args[0] === 'pr' && args[1] === 'create') { writeFileSync(${JSON.stringify(capturedArgsFile)}, JSON.stringify(args)); process.exit(0); }`,
+					"process.exit(1);",
+				].join("\n"),
+			);
+			writeFileSync(
+				fakeGhPath,
+				`#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeGhScript)} "$@"\n`,
+			);
+			chmodSync(fakeGhPath, 0o755);
+
+			const prevEnv = { ...process.env };
+			try {
+				process.env.PATH = `${binDir}${delimiter}${process.env.PATH ?? ""}`;
+				process.env.INPUT_WORKING_DIRECTORY = repoDir;
+				process.env.INPUT_REPO_URL = "https://github.com/owner/pkg";
+				process.env.GH_TOKEN = "test-token";
+
+				main(["--pr"]);
+
+				const createdArgs = JSON.parse(readFileSync(capturedArgsFile, "utf8"));
+				const titleIdx = createdArgs.indexOf("--title");
+				const bodyIdx = createdArgs.indexOf("--body");
+				assert.equal(createdArgs[titleIdx + 1], "chore: release 0.19.2");
+				const prBody = createdArgs[bodyIdx + 1];
+				assert.match(prBody, /Second fix after 0\.19\.1\./);
+				assert.doesNotMatch(prBody, /First fix in 0\.19\.1\./);
+				assert.match(prBody, /v0\.19\.1\.\.\.v0\.19\.2/);
+
+				// Also verify that when HEAD is a release commit for an already-existing tag (v0.19.1),
+				// release notes include commits up to HEAD rather than stopping at the old v0.19.1 tag
+				execFileSync("git", ["checkout", "main"], { cwd: repoDir });
+				writeFileSync(
+					join(repoDir, "package.json"),
+					JSON.stringify({ name: "pkg", version: "0.19.1" }, null, 2),
+				);
+				execFileSync("git", ["add", "package.json"], { cwd: repoDir });
+				execFileSync(
+					"git",
+					["commit", "--no-gpg-sign", "-m", "chore: release 0.19.1 (#587)"],
+					{ cwd: repoDir },
+				);
+				process.env.INPUT_MODE = "release";
+				main(["--ci"]);
+				const notes = readFileSync(join(repoDir, "release-notes.md"), "utf8");
+				assert.match(notes, /Second fix after 0\.19\.1\./);
+			} finally {
+				restoreEnv(prevEnv);
+			}
+		});
+	});
 });

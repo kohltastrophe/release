@@ -800,6 +800,16 @@ function isHeadTagged(cwd, version) {
 	return Boolean(headSha && tagSha && headSha === tagSha);
 }
 
+function listSemverTags(cwd) {
+	const raw = tryGit(cwd, ["tag", "-l", "v[0-9]*.[0-9]*.[0-9]*"]);
+	if (!raw) return [];
+	return raw
+		.split("\n")
+		.map((t) => t.trim())
+		.filter((t) => Boolean(t && parseSemver(t.slice(1))))
+		.sort((a, b) => compareSemver(b.slice(1), a.slice(1)));
+}
+
 function latestGitTag(cwd, fromRef = "HEAD") {
 	assertSafeGitRef(fromRef, "ref");
 	const tag = tryGit(cwd, [
@@ -810,7 +820,16 @@ function latestGitTag(cwd, fromRef = "HEAD") {
 		"v[0-9]*.[0-9]*.[0-9]*",
 		fromRef,
 	]);
-	return tag && parseSemver(tag.slice(1)) ? tag : undefined;
+	const reachableTag = tag && parseSemver(tag.slice(1)) ? tag : undefined;
+	if (fromRef !== "HEAD") {
+		return reachableTag;
+	}
+	const highestTag = listSemverTags(cwd)[0];
+	if (!highestTag) return reachableTag;
+	if (!reachableTag) return highestTag;
+	return compareSemver(highestTag.slice(1), reachableTag.slice(1)) > 0
+		? highestTag
+		: reachableTag;
 }
 
 export function readCommitsInRange(cwd, range) {
@@ -1023,12 +1042,16 @@ export function resolvePreviousReleaseTag(root, targetVersion, changelogText) {
 	let ref = hasGitTag(root, targetVersion) ? `v${targetVersion}~1` : "HEAD";
 	while (ref) {
 		const tag = latestGitTag(root, ref);
-		if (!tag) return undefined;
+		if (!tag) break;
 		if (!parseSemver(targetVersion) || compareSemver(tag.slice(1), targetVersion) < 0) {
 			return tag;
 		}
 		ref = `${tag}~1`;
 	}
+	if (parseSemver(targetVersion)) {
+		return listSemverTags(root).find((t) => compareSemver(t.slice(1), targetVersion) < 0);
+	}
+	return undefined;
 }
 
 /** Parses the JSON response from `GET /repos/{owner}/{repo}/actions/workflows/{workflow}/runs`. */
@@ -1202,7 +1225,12 @@ function resolveReleaseNotes(root, pkgVersion, targetVersion, repoUrl, options) 
 		? readFileSync(changelogPath, "utf8")
 		: undefined;
 	const prevTag = resolvePreviousReleaseTag(root, targetVersion, changelogText);
-	const endRef = hasGitTag(root, targetVersion) ? `v${targetVersion}` : "HEAD";
+	const headRelease = detectReleaseCommit(root, pkgVersion);
+	const useTagEndRef =
+		hasGitTag(root, targetVersion) &&
+		(isHeadTagged(root, targetVersion) ||
+			!(headRelease.isRelease && (headRelease.version ?? pkgVersion) === targetVersion));
+	const endRef = useTagEndRef ? `v${targetVersion}` : "HEAD";
 	let baseNotes;
 	if (changelogText !== undefined) {
 		baseNotes = extractReleaseNotes(pkgVersion, changelogText, targetVersion, repoUrl, options);
