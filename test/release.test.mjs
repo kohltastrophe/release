@@ -1129,4 +1129,129 @@ describe("semver & conventional commits", () => {
 			}
 		});
 	});
+
+	test("cleans up remote release/main branch on release, non-releasable commits, and failed PR creation", () => {
+		withTempDir((dir) => {
+			const remoteDir = join(dir, "remote.git");
+			const repoDir = join(dir, "repo");
+			const binDir = join(dir, "bin");
+			mkdirSync(remoteDir, { recursive: true });
+			mkdirSync(repoDir, { recursive: true });
+			mkdirSync(binDir, { recursive: true });
+
+			execFileSync("git", ["init", "--bare", "-b", "main"], { cwd: remoteDir });
+			initGitRepo(repoDir);
+			execFileSync("git", ["remote", "add", "origin", remoteDir], { cwd: repoDir });
+
+			writeFileSync(
+				join(repoDir, "package.json"),
+				JSON.stringify({ name: "pkg", version: "0.1.0" }, null, 2),
+			);
+			execFileSync("git", ["add", "package.json"], { cwd: repoDir });
+			execFileSync("git", ["commit", "--no-gpg-sign", "-m", "feat: initial release"], {
+				cwd: repoDir,
+			});
+			execFileSync("git", ["tag", "v0.1.0"], { cwd: repoDir });
+			execFileSync("git", ["push", "-u", "origin", "main", "--tags"], { cwd: repoDir });
+
+			// Add a releasable commit so --pr attempts to push release/main and open a PR
+			gitCommit(repoDir, "feat: add feature");
+
+			// 1. If gh pr create fails (with no existing PR), release/main is rolled back from origin
+			const failingGhScript = join(binDir, "fail-gh.mjs");
+			const fakeGhPath = join(binDir, "gh");
+			writeFileSync(
+				failingGhScript,
+				[
+					"const args = process.argv.slice(2);",
+					"if (args[0] === 'pr' && args[1] === 'list') { process.stdout.write('[]'); process.exit(0); }",
+					"if (args[0] === 'pr' && args[1] === 'create') { process.stderr.write('createPullRequest forbidden\\n'); process.exit(1); }",
+					"process.exit(1);",
+				].join("\n"),
+			);
+			writeFileSync(
+				fakeGhPath,
+				`#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(failingGhScript)} "$@"\n`,
+			);
+			chmodSync(fakeGhPath, 0o755);
+
+			const hasRemoteReleaseBranch = () => {
+				const out = execFileSync(
+					"git",
+					["ls-remote", "--heads", remoteDir, "refs/heads/release/main"],
+					{ encoding: "utf8" },
+				).trim();
+				return out.length > 0;
+			};
+
+			const prevEnv = { ...process.env };
+			try {
+				process.env.PATH = `${binDir}${delimiter}${process.env.PATH ?? ""}`;
+				process.env.INPUT_WORKING_DIRECTORY = repoDir;
+				process.env.INPUT_REPO_URL = "https://github.com/owner/pkg";
+				process.env.GH_TOKEN = "test-token";
+
+				assert.throws(() => main(["--pr"]), /Command failed: gh pr create/);
+				assert.equal(
+					hasRemoteReleaseBranch(),
+					false,
+					"expected release/main to be deleted from origin when gh pr create fails",
+				);
+
+				// Switch back to main and make gh succeed so release/main is created on origin
+				execFileSync("git", ["checkout", "main"], { cwd: repoDir });
+				writeFileSync(
+					failingGhScript,
+					[
+						"const args = process.argv.slice(2);",
+						"if (args[0] === 'pr' && args[1] === 'list') { process.stdout.write('[]'); process.exit(0); }",
+						"if (args[0] === 'pr' && args[1] === 'create') { process.exit(0); }",
+						"process.exit(1);",
+					].join("\n"),
+				);
+				main(["--pr"]);
+				assert.equal(
+					hasRemoteReleaseBranch(),
+					true,
+					"expected release/main to exist on origin while Release PR is open",
+				);
+
+				// 2. Simulate squash-merging the release commit onto main without GitHub auto-deleting release/main
+				execFileSync("git", ["checkout", "main"], { cwd: repoDir });
+				writeFileSync(
+					join(repoDir, "package.json"),
+					JSON.stringify({ name: "pkg", version: "0.2.0" }, null, 2),
+				);
+				execFileSync("git", ["add", "package.json"], { cwd: repoDir });
+				execFileSync(
+					"git",
+					["commit", "--no-gpg-sign", "-m", "chore: release 0.2.0 (#1)"],
+					{ cwd: repoDir },
+				);
+				process.env.INPUT_MODE = "auto";
+				main(["--ci"]);
+				assert.equal(
+					hasRemoteReleaseBranch(),
+					false,
+					"expected runReleaseMode to delete stale release/main branch from origin",
+				);
+
+				// 3. If release/main is left over when there are no releasable commits, --pr cleans it up
+				execFileSync("git", ["tag", "v0.2.0"], { cwd: repoDir });
+				execFileSync("git", ["push", "origin", "HEAD:refs/heads/release/main"], {
+					cwd: repoDir,
+				});
+				assert.equal(hasRemoteReleaseBranch(), true);
+				gitCommit(repoDir, "docs: update readme");
+				main(["--pr"]);
+				assert.equal(
+					hasRemoteReleaseBranch(),
+					false,
+					"expected runPullRequestFlow to delete stale release/main when no releasable commits exist",
+				);
+			} finally {
+				restoreEnv(prevEnv);
+			}
+		});
+	});
 });

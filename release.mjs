@@ -1232,6 +1232,59 @@ function resolveReleaseNotes(root, pkgVersion, targetVersion, repoUrl, options) 
 	});
 }
 
+function gitAuthConfigArgs() {
+	const token = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim();
+	if (!token) return [];
+	const serverUrl = (process.env.GITHUB_SERVER_URL || "https://github.com").replace(/\/+$/, "");
+	const basic = Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
+	return [
+		"-c",
+		`http.${serverUrl}/.extraheader=`,
+		"-c",
+		`http.${serverUrl}/.extraheader=AUTHORIZATION: basic ${basic}`,
+	];
+}
+
+function resolveBaseBranch(root) {
+	const refName = (process.env.GITHUB_REF_NAME || "").trim();
+	const isTagRef =
+		process.env.GITHUB_REF_TYPE === "tag" ||
+		(refName.startsWith("v") && Boolean(parseSemver(refName.slice(1))));
+	if (refName && !isTagRef) {
+		return refName;
+	}
+	const originHead = tryGit(root, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+	if (originHead?.startsWith("origin/")) {
+		return originHead.slice("origin/".length);
+	}
+	return "main";
+}
+
+function deleteRemoteReleaseBranch(root, baseBranch = resolveBaseBranch(root)) {
+	if (!tryGit(root, ["remote", "get-url", "origin"])) return false;
+	const releaseBranch = `release/${baseBranch}`;
+	if (
+		tryGit(root, [
+			"ls-remote",
+			"--exit-code",
+			"--heads",
+			"origin",
+			`refs/heads/${releaseBranch}`,
+		]) === undefined
+	) {
+		return false;
+	}
+	return (
+		tryGit(root, [
+			...gitAuthConfigArgs(),
+			"push",
+			"origin",
+			"--delete",
+			`refs/heads/${releaseBranch}`,
+		]) !== undefined
+	);
+}
+
 function publishReleasePullRequest(
 	root,
 	baseBranch,
@@ -1274,59 +1327,78 @@ function publishReleasePullRequest(
 		],
 		{ cwd: root },
 	);
-	execFileSync("git", ["push", "--force", "origin", `HEAD:refs/heads/${releaseBranch}`], {
-		cwd: root,
-		timeout: 60_000,
-	});
-
-	const rawPrList = execFileSync(
-		"gh",
+	execFileSync(
+		"git",
 		[
-			"pr",
-			"list",
-			"--head",
-			releaseBranch,
-			"--base",
-			baseBranch,
-			"--state",
-			"open",
-			"--json",
-			"number",
+			...gitAuthConfigArgs(),
+			"push",
+			"--force",
+			"origin",
+			`HEAD:refs/heads/${releaseBranch}`,
 		],
-		{ cwd: root, encoding: "utf8", timeout: 60_000 },
-	).trim();
-	let existingPr = "";
-	if (rawPrList) {
-		try {
-			const parsedPrs = JSON.parse(rawPrList);
-			existingPr = parsedPrs?.[0]?.number ? String(parsedPrs[0].number) : "";
-		} catch {
-			existingPr = rawPrList;
-		}
-	}
+		{
+			cwd: root,
+			timeout: 60_000,
+		},
+	);
 
-	const ghArgs = existingPr
-		? ["pr", "edit", existingPr, "--title", prTitle, "--body", prBody]
-		: [
+	let existingPr = "";
+	try {
+		const rawPrList = execFileSync(
+			"gh",
+			[
 				"pr",
-				"create",
+				"list",
 				"--head",
 				releaseBranch,
 				"--base",
 				baseBranch,
-				"--title",
-				prTitle,
-				"--body",
-				prBody,
-			];
-	execFileSync("gh", ghArgs, { cwd: root, stdio: "inherit", timeout: 60_000 });
+				"--state",
+				"open",
+				"--json",
+				"number",
+			],
+			{ cwd: root, encoding: "utf8", timeout: 60_000 },
+		).trim();
+		if (rawPrList) {
+			try {
+				const parsedPrs = JSON.parse(rawPrList);
+				existingPr = parsedPrs?.[0]?.number ? String(parsedPrs[0].number) : "";
+			} catch {
+				existingPr = rawPrList;
+			}
+		}
+
+		const ghArgs = existingPr
+			? ["pr", "edit", existingPr, "--title", prTitle, "--body", prBody]
+			: [
+					"pr",
+					"create",
+					"--head",
+					releaseBranch,
+					"--base",
+					baseBranch,
+					"--title",
+					prTitle,
+					"--body",
+					prBody,
+				];
+		execFileSync("gh", ghArgs, { cwd: root, stdio: "inherit", timeout: 60_000 });
+	} catch (error) {
+		if (!existingPr) {
+			deleteRemoteReleaseBranch(root, baseBranch);
+		}
+		throw error;
+	}
 }
 
 function runPullRequestFlow(root, repoUrl, cachedHeadSubject) {
 	const headSubject = cachedHeadSubject ?? headCommitSubject(root);
 	const { version: manifestVersion, files } = detectRepoVersion(root);
+	const baseBranch = resolveBaseBranch(root);
 	const releaseCommit = detectReleaseCommit(root, manifestVersion, headSubject);
 	if (releaseCommit.isRelease) {
+		deleteRemoteReleaseBranch(root, baseBranch);
 		console.log(`HEAD is already a release commit ("${headSubject}"); skipping PR creation`);
 		writeReleaseOutputs(releaseCommit.version ?? manifestVersion, false);
 		return;
@@ -1343,6 +1415,7 @@ function runPullRequestFlow(root, repoUrl, cachedHeadSubject) {
 	});
 
 	if (!bump || !markdown) {
+		deleteRemoteReleaseBranch(root, baseBranch);
 		console.log(`no releasable commits since v${baseVersion}; skipping release PR`);
 		writeReleaseOutputs(baseVersion, false);
 		return;
@@ -1365,7 +1438,6 @@ function runPullRequestFlow(root, repoUrl, cachedHeadSubject) {
 		prNotes = prepared.notes;
 	}
 
-	const baseBranch = process.env.GITHUB_REF_NAME || "main";
 	publishReleasePullRequest(root, baseBranch, nextVersion, prNotes, modifiedFiles, repoUrl, tag);
 	writeReleaseOutputs(nextVersion, false);
 }
@@ -1437,9 +1509,12 @@ function runReleaseMode(root, repoUrl, currentVersion, versionsByFile, releaseVe
 	}
 	validateVersionConsistency(version, versionsByFile);
 	const notes = resolveReleaseNotes(root, version, version, repoUrl, { allowUnreleased: dryRun });
-	if (!dryRun && process.env.INPUT_WAIT_FOR_CI?.trim()) {
-		const timeoutMinutes = Number(process.env.INPUT_WAIT_TIMEOUT) || 30;
-		waitForCiWorkflows(root, repoUrl, process.env.INPUT_WAIT_FOR_CI, timeoutMinutes);
+	if (!dryRun) {
+		if (process.env.INPUT_WAIT_FOR_CI?.trim()) {
+			const timeoutMinutes = Number(process.env.INPUT_WAIT_TIMEOUT) || 30;
+			waitForCiWorkflows(root, repoUrl, process.env.INPUT_WAIT_FOR_CI, timeoutMinutes);
+		}
+		deleteRemoteReleaseBranch(root);
 	}
 	const notesFile = join(root, "release-notes.md");
 	writeFileSync(notesFile, notes, "utf8");
