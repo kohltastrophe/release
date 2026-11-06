@@ -1,6 +1,6 @@
 {
 	"name": "@kohltastrophe/release",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Conventional Commits validation, Keep a Changelog generator, and automated Release PR action.",
 	"license": "MIT",
 	"author": "Kohl <kohltastrophe@gmail.com>",
