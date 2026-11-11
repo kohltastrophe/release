@@ -1,0 +1,95 @@
+name: "Release & Conventional Commits"
+description: "Validate Conventional Commits, maintain Keep a Changelog Release PRs, and publish GitHub Releases."
+author: "Kohl"
+
+branding:
+  icon: "tag"
+  color: "purple"
+
+inputs:
+  mode:
+    description: "Operation mode: auto | check | pr | release | publish"
+    required: false
+    default: "auto"
+  token:
+    description: "GitHub token for opening Release PRs and publishing GitHub Releases"
+    required: false
+    default: ${{ github.token }}
+  working-directory:
+    description: "Repository root directory"
+    required: false
+    default: "."
+  pr-title:
+    description: "Pull request title to validate in check mode"
+    required: false
+    default: ${{ github.event.pull_request.title }}
+  repo-url:
+    description: "Repository URL override for changelog release tag links"
+    required: false
+    default: ""
+  version-files:
+    description: "Additional version files (newline-separated paths or file:pattern entries) to validate and bump"
+    required: false
+    default: ""
+  tag-prefix:
+    description: "Git tag prefix before SemVer versions (overrides [release].prefix; defaults to v)"
+    required: false
+    default: ""
+  dry-run:
+    description: "Validate state and preview release notes without pushing branches, opening PRs, or publishing (auto-reads workflow_dispatch inputs.dry_run when omitted)"
+    required: false
+    default: ""
+  wait-for-ci:
+    description: "Comma or newline-separated CI workflow filenames (e.g. ci.yml) to wait for on $GITHUB_SHA before releasing"
+    required: false
+    default: ""
+  wait-timeout:
+    description: "Maximum minutes to wait for CI workflows to complete"
+    required: false
+    default: "30"
+  publish:
+    description: "Create or update the GitHub Release when releasing"
+    required: false
+    default: "false"
+  title:
+    description: "GitHub Release title (supports {version} and {tag} placeholders; defaults to {tag})"
+    required: false
+    default: ""
+  files:
+    description: "Newline or comma-separated release asset paths, globs, or directories (supports {version} and {tag})"
+    required: false
+    default: ""
+  checksums:
+    description: "Generate and attach SHA256SUMS for release assets ('true' or a repo-relative path such as dist/SHA256SUMS)"
+    required: false
+    default: ""
+  major-tag:
+    description: "Update and push the floating major version tag (e.g. v1) on stable releases"
+    required: false
+    default: "false"
+
+outputs:
+  should_release:
+    description: "Whether the current commit or tag should publish a release"
+  should_build:
+    description: "Whether release artifacts should be built and tested (should_release || dry_run)"
+  dry_run:
+    description: "Whether this invocation ran in dry-run mode"
+  version:
+    description: "Resolved SemVer version (without tag prefix)"
+  tag:
+    description: "Resolved Git tag (e.g. v1.2.0)"
+  prerelease:
+    description: "Whether the resolved version carries a SemVer prerelease suffix"
+  notes_file:
+    description: "Path to the generated release-notes.md file"
+  release_url:
+    description: "HTML URL of the created or updated GitHub Release"
+  pr_url:
+    description: "HTML URL of the created or updated Release PR"
+  pr_number:
+    description: "Pull request number of the created or updated Release PR"
+
+runs:
+  using: "node24"
+  main: "release.mjs"
