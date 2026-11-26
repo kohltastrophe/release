@@ -12,7 +12,7 @@ export const HEADING_RE = /^## \[([^\]]+)\](?: - (\S+))?$/gm;
 const LINK_DEF_RE = /^\[([^\]]+)\]:\s*(\S+)\s*$/;
 const TAG_LINK_URL_RE = /^(https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+)\/releases\/tag\//;
 const COMMIT_RE =
-	/^(feat|fix|perf|docs|refactor|test|build|ci|chore|revert|security)(?:\([a-zA-Z0-9_./-]+\))?(!)?:\s+(.+)$/;
+	/^(feat|fix|perf|docs|refactor|test|build|ci|chore|revert|security)(?:\([^\s()\r\n](?:[^()\r\n]*[^\s()\r\n])?\))?(!)?:\s+(.+)$/;
 export const RELEASE_COMMIT_RE =
 	/^chore(?:\(release\))?:\s*release\s+(?:[A-Za-z_-]*?)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\s+\(#\d+\))?$/i;
 const TRAILING_PR_RE = /^(.*?)\s*\(#(\d+)\)[0-9.)\s]*$/;

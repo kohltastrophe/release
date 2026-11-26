@@ -108,10 +108,40 @@ describe("changelog & conventional commits", () => {
 			breaking: true,
 			description: "reject malformed tokens",
 		});
-		assert.throws(
-			() => validateCommitSubject("Update README.md"),
-			/invalid Conventional Commit subject/,
-		);
+		assert.deepEqual(validateCommitSubject("perf(mutate,runner): improve mutation speed"), {
+			type: "perf",
+			breaking: false,
+			description: "improve mutation speed",
+		});
+		assert.deepEqual(validateCommitSubject("feat(engine, sim): expand parity"), {
+			type: "feat",
+			breaking: false,
+			description: "expand parity",
+		});
+		assert.deepEqual(validateCommitSubject("fix(@scope/pkg): handle scoped package"), {
+			type: "fix",
+			breaking: false,
+			description: "handle scoped package",
+		});
+		assert.deepEqual(validateCommitSubject("feat(a): support single-char scope"), {
+			type: "feat",
+			breaking: false,
+			description: "support single-char scope",
+		});
+		for (const invalid of [
+			"Update README.md",
+			"feat(): empty scope",
+			"feat(   ): blank scope",
+			"feat( parser): leading space",
+			"feat(parser ): trailing space",
+			"feat(a(b)): nested parens",
+			"feat (parser): detached scope",
+		]) {
+			assert.throws(
+				() => validateCommitSubject(invalid),
+				/invalid Conventional Commit subject/,
+			);
+		}
 		assert.deepEqual(splitTrailingPrRef("stop hat cache leak (#579)5"), {
 			text: "stop hat cache leak",
 			pr: "579",
