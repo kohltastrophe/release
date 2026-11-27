@@ -1,3 +1,7 @@
+<div align="right">
+<a href="https://discord.gg/kohl"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kohltastrophe/kohltastrophe/main/.github/img/link-discord-dark.svg"><img alt="Discord" src="https://raw.githubusercontent.com/kohltastrophe/kohltastrophe/main/.github/img/link-discord.svg"></picture></a>
+</div>
+
 # release
 
 [![CI](https://img.shields.io/github/actions/workflow/status/kohltastrophe/release/release.yml?style=for-the-badge)](https://github.com/kohltastrophe/release/actions/workflows/release.yml) [![License](https://img.shields.io/github/license/kohltastrophe/release?style=for-the-badge)](LICENSE.md) [![GitHub Release](https://img.shields.io/github/v/release/kohltastrophe/release?style=for-the-badge)](https://github.com/kohltastrophe/release/releases)
